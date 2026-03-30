@@ -101,40 +101,53 @@ def from_case(case: Case) -> TestCaseData:
     - Query parameters (accountIds, actionGroups, orgId, etc.)
     - Request body characteristics
     - Special cases (empty values, long strings, special characters)
+    - Hook modifications (missing required parameters)
     """
     # Start with the operation label
     test_name = case.operation.label
     descriptors = []
 
+    # Check if hook has marked parameters as missing
+    hook_modifications = []
+    if hasattr(case, '_modified_by_hook'):
+        hook_modifications = case._modified_by_hook
+
     # Analyze query parameters
-    if case.query:
+    if case.query or hook_modifications:
         query_desc = []
-        for key, value in case.query.items():
-            # Handle empty/null values
-            if value == "" or value is None:
-                query_desc.append(f"{key}=EMPTY")
-            # Handle very long values
-            elif isinstance(value, str) and len(value) > 30:
-                query_desc.append(f"{key}=LONG[{len(value)}]")
-            # Handle special characters
-            elif isinstance(value, str) and any(char in value for char in "!@#$%^&*()[]{}"):
-                query_desc.append(f"{key}=SPECIAL")
-            # Handle numeric strings
-            elif isinstance(value, str) and value.isdigit():
-                query_desc.append(f"{key}=NUM[{value[:10]}]")
-            # Handle UUID format (36 chars with 4 hyphens)
-            elif isinstance(value, str) and len(value) == 36 and value.count('-') == 4:
-                query_desc.append(f"{key}=UUID[{value[:8]}]")
-            # Handle whitespace
-            elif isinstance(value, str) and (value.startswith(" ") or value.endswith(" ")):
-                query_desc.append(f"{key}=SPACE")
-            # Normal values - truncate if needed
-            else:
-                str_val = str(value)
-                if len(str_val) > 20:
-                    query_desc.append(f"{key}={str_val[:17]}...")
+
+        # Add missing parameters first (marked by hook)
+        for modification in hook_modifications:
+            query_desc.append(modification)
+
+        # Then add present parameters
+        if case.query:
+            for key, value in case.query.items():
+                # Handle empty/null values
+                if value == "" or value is None:
+                    query_desc.append(f"{key}=EMPTY")
+                # Handle very long values
+                elif isinstance(value, str) and len(value) > 30:
+                    query_desc.append(f"{key}=LONG[{len(value)}]")
+                # Handle special characters
+                elif isinstance(value, str) and any(char in value for char in "!@#$%^&*()[]{}"):
+                    query_desc.append(f"{key}=SPECIAL")
+                # Handle numeric strings
+                elif isinstance(value, str) and value.isdigit():
+                    query_desc.append(f"{key}=NUM[{value[:10]}]")
+                # Handle UUID format (36 chars with 4 hyphens)
+                elif isinstance(value, str) and len(value) == 36 and value.count('-') == 4:
+                    query_desc.append(f"{key}=UUID[{value[:8]}]")
+                # Handle whitespace
+                elif isinstance(value, str) and (value.startswith(" ") or value.endswith(" ")):
+                    query_desc.append(f"{key}=SPACE")
+                # Normal values - truncate if needed
                 else:
-                    query_desc.append(f"{key}={str_val}")
+                    str_val = str(value)
+                    if len(str_val) > 20:
+                        query_desc.append(f"{key}={str_val[:17]}...")
+                    else:
+                        query_desc.append(f"{key}={str_val}")
 
         if query_desc:
             # Join all query parameters
