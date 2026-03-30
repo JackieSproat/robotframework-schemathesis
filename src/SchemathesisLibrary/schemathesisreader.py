@@ -23,6 +23,7 @@ from robot.api import logger
 from robot.utils.importer import Importer  # type: ignore
 from schemathesis import Case, GenerationMode, openapi
 from schemathesis.config import SchemathesisConfig
+from schemathesis.core import NotSet
 from schemathesis.core.result import Ok
 
 
@@ -93,8 +94,93 @@ class SchemathesisReader(AbstractReaderClass):
 
 
 def from_case(case: Case) -> TestCaseData:
+    """
+    Generate descriptive test case name from Schemathesis Case object.
+
+    Creates human-readable test names based on:
+    - Query parameters (accountIds, actionGroups, orgId, etc.)
+    - Request body characteristics
+    - Special cases (empty values, long strings, special characters)
+    """
+    # Start with the operation label
+    test_name = case.operation.label
+    descriptors = []
+
+    # Analyze query parameters
+    if case.query:
+        query_desc = []
+        for key, value in case.query.items():
+            # Handle empty/null values
+            if value == "" or value is None:
+                query_desc.append(f"{key}=EMPTY")
+            # Handle very long values
+            elif isinstance(value, str) and len(value) > 30:
+                query_desc.append(f"{key}=LONG[{len(value)}]")
+            # Handle special characters
+            elif isinstance(value, str) and any(char in value for char in "!@#$%^&*()[]{}"):
+                query_desc.append(f"{key}=SPECIAL")
+            # Handle numeric strings
+            elif isinstance(value, str) and value.isdigit():
+                query_desc.append(f"{key}=NUM[{value[:10]}]")
+            # Handle UUID format (36 chars with 4 hyphens)
+            elif isinstance(value, str) and len(value) == 36 and value.count('-') == 4:
+                query_desc.append(f"{key}=UUID[{value[:8]}]")
+            # Handle whitespace
+            elif isinstance(value, str) and (value.startswith(" ") or value.endswith(" ")):
+                query_desc.append(f"{key}=SPACE")
+            # Normal values - truncate if needed
+            else:
+                str_val = str(value)
+                if len(str_val) > 20:
+                    query_desc.append(f"{key}={str_val[:17]}...")
+                else:
+                    query_desc.append(f"{key}={str_val}")
+
+        if query_desc:
+            # Join all query parameters
+            descriptors.append(f"[{', '.join(query_desc)}]")
+
+    # Analyze path parameters
+    if case.path_parameters:
+        path_desc = []
+        for key, value in case.path_parameters.items():
+            str_val = str(value)[:15]
+            path_desc.append(f"{key}={str_val}")
+        if path_desc:
+            descriptors.append(f"Path[{', '.join(path_desc)}]")
+
+    # Analyze request body
+    if case.body and not isinstance(case.body, NotSet):
+        if isinstance(case.body, dict):
+            body_keys = list(case.body.keys())
+            if len(body_keys) <= 3:
+                descriptors.append(f"Body[{', '.join(body_keys)}]")
+            else:
+                descriptors.append(f"Body[{len(body_keys)}fields]")
+        elif isinstance(case.body, list):
+            descriptors.append(f"Body[list:{len(case.body)}]")
+        elif isinstance(case.body, str):
+            if len(case.body) == 0:
+                descriptors.append("Body[EMPTY]")
+            elif len(case.body) > 100:
+                descriptors.append(f"Body[{len(case.body)}bytes]")
+            else:
+                descriptors.append(f"Body[str]")
+
+    # Build final test name
+    if descriptors:
+        test_name = f"{test_name} {' '.join(descriptors)}"
+    else:
+        # Fallback to ID if no meaningful descriptors
+        test_name = f"{test_name} - {case.id}"
+
+    # Ensure name isn't too long (Robot Framework limit ~255 chars)
+    max_length = 180
+    if len(test_name) > max_length:
+        test_name = test_name[:max_length-3] + "..."
+
     return TestCaseData(
-        test_case_name=f"{case.operation.label} - {case.id}",
+        test_case_name=test_name,
         arguments={"${case}": case},
     )
 
